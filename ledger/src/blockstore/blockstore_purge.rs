@@ -532,7 +532,7 @@ pub mod tests {
     use {
         super::*,
         crate::{
-            blockstore::tests::make_slot_entries_with_transactions, get_tmp_ledger_path_auto_delete,
+            blockstore::make_slot_entries_with_transactions, get_tmp_ledger_path_auto_delete,
         },
         bincode::serialize,
         solana_entry::entry::next_entry_mut,
