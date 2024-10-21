@@ -4,13 +4,21 @@ extern crate solana_ledger;
 extern crate test;
 
 use {
+    bincode::serialize,
     rand::Rng,
     solana_entry::entry::{create_ticks, Entry},
     solana_ledger::{
-        blockstore::{entries_to_test_shreds, Blockstore},
+        blockstore::{
+            entries_to_test_shreds, get_last_hash, make_slot_entries_with_transactions, Blockstore,
+        },
+        blockstore_meta::SlotMeta,
         get_tmp_ledger_path_auto_delete,
     },
-    solana_sdk::{clock::Slot, hash::Hash},
+    solana_sdk::{
+        clock::Slot, hash::Hash, message::v0::LoadedAddresses,
+        transaction_context::TransactionReturnData,
+    },
+    solana_transaction_status::{TransactionStatusMeta, VersionedTransactionWithStatusMeta},
     std::path::Path,
     test::Bencher,
 };
@@ -152,5 +160,146 @@ fn bench_insert_data_shred_big(bench: &mut Bencher) {
     bench.iter(move || {
         let shreds = entries_to_test_shreds(&entries, 0, 0, true, 0, /*merkle_variant:*/ true);
         blockstore.insert_shreds(shreds, None, false).unwrap();
+    });
+}
+
+#[bench]
+fn bench_get_complete_block(bench: &mut Bencher) {
+    let slot = 10;
+    let entries = make_slot_entries_with_transactions(100);
+    let shreds = entries_to_test_shreds(
+        &entries,
+        slot,
+        slot - 1, // parent_slot
+        true,     // is_full_slot
+        0,        // version
+        true,     // merkle_variant
+    );
+    let more_shreds = entries_to_test_shreds(
+        &entries,
+        slot + 1,
+        slot, // parent_slot
+        true, // is_full_slot
+        0,    // version
+        true, // merkle_variant
+    );
+    let unrooted_shreds = entries_to_test_shreds(
+        &entries,
+        slot + 2,
+        slot + 1, // parent_slot
+        true,     // is_full_slot
+        0,        // version
+        true,     // merkle_variant
+    );
+    let ledger_path = get_tmp_ledger_path_auto_delete!();
+    let blockstore = Blockstore::open(ledger_path.path()).unwrap();
+
+    blockstore.insert_shreds(shreds, None, false).unwrap();
+    blockstore.insert_shreds(more_shreds, None, false).unwrap();
+    blockstore
+        .insert_shreds(unrooted_shreds, None, false)
+        .unwrap();
+    blockstore
+        .set_roots([slot - 1, slot, slot + 1].iter())
+        .unwrap();
+
+    let parent_meta = SlotMeta::default();
+    blockstore
+        .put_meta_bytes(slot - 1, &serialize(&parent_meta).unwrap())
+        .unwrap();
+
+    let expected_transactions: Vec<VersionedTransactionWithStatusMeta> = entries
+        .iter()
+        .filter(|entry| !entry.is_tick())
+        .cloned()
+        .flat_map(|entry| entry.transactions)
+        .map(|transaction| {
+            let mut pre_balances: Vec<u64> = vec![];
+            let mut post_balances: Vec<u64> = vec![];
+            for i in 0..transaction.message.static_account_keys().len() {
+                pre_balances.push(i as u64 * 10);
+                post_balances.push(i as u64 * 11);
+            }
+            let compute_units_consumed = Some(12345);
+            let signature = transaction.signatures[0];
+            let status = TransactionStatusMeta {
+                status: Ok(()),
+                fee: 42,
+                pre_balances: pre_balances.clone(),
+                post_balances: post_balances.clone(),
+                inner_instructions: Some(vec![]),
+                log_messages: Some(vec![]),
+                pre_token_balances: Some(vec![]),
+                post_token_balances: Some(vec![]),
+                rewards: Some(vec![]),
+                loaded_addresses: LoadedAddresses::default(),
+                return_data: Some(TransactionReturnData::default()),
+                compute_units_consumed,
+            }
+                .into();
+            blockstore
+                .transaction_status_cf
+                .put_protobuf((signature, slot), &status)
+                .unwrap();
+            let status = TransactionStatusMeta {
+                status: Ok(()),
+                fee: 42,
+                pre_balances: pre_balances.clone(),
+                post_balances: post_balances.clone(),
+                inner_instructions: Some(vec![]),
+                log_messages: Some(vec![]),
+                pre_token_balances: Some(vec![]),
+                post_token_balances: Some(vec![]),
+                rewards: Some(vec![]),
+                loaded_addresses: LoadedAddresses::default(),
+                return_data: Some(TransactionReturnData::default()),
+                compute_units_consumed,
+            }
+                .into();
+            blockstore
+                .transaction_status_cf
+                .put_protobuf((signature, slot + 1), &status)
+                .unwrap();
+            let status = TransactionStatusMeta {
+                status: Ok(()),
+                fee: 42,
+                pre_balances: pre_balances.clone(),
+                post_balances: post_balances.clone(),
+                inner_instructions: Some(vec![]),
+                log_messages: Some(vec![]),
+                pre_token_balances: Some(vec![]),
+                post_token_balances: Some(vec![]),
+                rewards: Some(vec![]),
+                loaded_addresses: LoadedAddresses::default(),
+                return_data: Some(TransactionReturnData::default()),
+                compute_units_consumed,
+            }
+                .into();
+            blockstore
+                .transaction_status_cf
+                .put_protobuf((signature, slot + 2), &status)
+                .unwrap();
+            VersionedTransactionWithStatusMeta {
+                transaction,
+                meta: TransactionStatusMeta {
+                    status: Ok(()),
+                    fee: 42,
+                    pre_balances,
+                    post_balances,
+                    inner_instructions: Some(vec![]),
+                    log_messages: Some(vec![]),
+                    pre_token_balances: Some(vec![]),
+                    post_token_balances: Some(vec![]),
+                    rewards: Some(vec![]),
+                    loaded_addresses: LoadedAddresses::default(),
+                    return_data: Some(TransactionReturnData::default()),
+                    compute_units_consumed,
+                },
+            }
+        })
+        .collect();
+
+    bench.iter(move || {
+        blockstore.get_complete_block(slot + 2, true).unwrap();
     });
 }

@@ -242,7 +242,7 @@ pub struct Blockstore {
     index_cf: LedgerColumn<cf::Index>,
     data_shred_cf: LedgerColumn<cf::ShredData>,
     code_shred_cf: LedgerColumn<cf::ShredCode>,
-    transaction_status_cf: LedgerColumn<cf::TransactionStatus>,
+    pub transaction_status_cf: LedgerColumn<cf::TransactionStatus>,
     address_signatures_cf: LedgerColumn<cf::AddressSignatures>,
     transaction_memos_cf: LedgerColumn<cf::TransactionMemos>,
     transaction_status_index_cf: LedgerColumn<cf::TransactionStatusIndex>,
@@ -4637,7 +4637,7 @@ fn update_slot_meta(
     )
 }
 
-fn get_last_hash<'a>(iterator: impl Iterator<Item = &'a Entry> + 'a) -> Option<Hash> {
+pub fn get_last_hash<'a>(iterator: impl Iterator<Item = &'a Entry> + 'a) -> Option<Hash> {
     iterator.last().map(|entry| entry.hash)
 }
 
@@ -5330,6 +5330,32 @@ fn adjust_ulimit_nofile(enforce_ulimit_nofile: bool) -> Result<()> {
     Ok(())
 }
 
+pub fn make_slot_entries_with_transactions(num_entries: u64) -> Vec<Entry> {
+    let mut entries: Vec<Entry> = Vec::new();
+    for x in 0..num_entries {
+        let transaction = solana_sdk::transaction::Transaction::new_with_compiled_instructions(
+            &[&Keypair::new()],
+            &[solana_sdk::pubkey::new_rand()],
+            Hash::default(),
+            vec![solana_sdk::pubkey::new_rand()],
+            vec![solana_sdk::instruction::CompiledInstruction::new(
+                1,
+                &(),
+                vec![0],
+            )],
+        );
+        entries.push(solana_entry::entry::next_entry_mut(
+            &mut Hash::default(),
+            0,
+            vec![transaction],
+        ));
+        let mut tick = create_ticks(1, 0, solana_sdk::hash::hash(&serialize(&x).unwrap()));
+        entries.append(&mut tick);
+    }
+    entries
+}
+
+
 #[cfg(test)]
 pub mod tests {
     use {
@@ -5368,22 +5394,22 @@ pub mod tests {
     };
 
     // used for tests only
-    pub(crate) fn make_slot_entries_with_transactions(num_entries: u64) -> Vec<Entry> {
-        let mut entries: Vec<Entry> = Vec::new();
-        for x in 0..num_entries {
-            let transaction = Transaction::new_with_compiled_instructions(
-                &[&Keypair::new()],
-                &[solana_sdk::pubkey::new_rand()],
-                Hash::default(),
-                vec![solana_sdk::pubkey::new_rand()],
-                vec![CompiledInstruction::new(1, &(), vec![0])],
-            );
-            entries.push(next_entry_mut(&mut Hash::default(), 0, vec![transaction]));
-            let mut tick = create_ticks(1, 0, hash(&serialize(&x).unwrap()));
-            entries.append(&mut tick);
-        }
-        entries
-    }
+    // pub(crate) fn make_slot_entries_with_transactions(num_entries: u64) -> Vec<Entry> {
+    //     let mut entries: Vec<Entry> = Vec::new();
+    //     for x in 0..num_entries {
+    //         let transaction = Transaction::new_with_compiled_instructions(
+    //             &[&Keypair::new()],
+    //             &[solana_sdk::pubkey::new_rand()],
+    //             Hash::default(),
+    //             vec![solana_sdk::pubkey::new_rand()],
+    //             vec![CompiledInstruction::new(1, &(), vec![0])],
+    //         );
+    //         entries.push(next_entry_mut(&mut Hash::default(), 0, vec![transaction]));
+    //         let mut tick = create_ticks(1, 0, hash(&serialize(&x).unwrap()));
+    //         entries.append(&mut tick);
+    //     }
+    //     entries
+    // }
 
     fn make_and_insert_slot(blockstore: &Blockstore, slot: Slot, parent_slot: Slot) {
         let (shreds, _) = make_slot_entries(
