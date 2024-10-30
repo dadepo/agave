@@ -5167,6 +5167,32 @@ pub fn entries_to_test_shreds(
         .0
 }
 
+// Returns only the code shred
+pub fn entries_to_test_code_shreds(
+    entries: &[Entry],
+    slot: Slot,
+    parent_slot: Slot,
+    is_full_slot: bool,
+    version: u16,
+    merkle_variant: bool,
+) -> Vec<Shred> {
+    Shredder::new(slot, parent_slot, 0, version)
+        .unwrap()
+        .entries_to_shreds(
+            &Keypair::new(),
+            entries,
+            is_full_slot,
+            // chained_merkle_root
+            Some(Hash::new_from_array(rand::thread_rng().gen())),
+            0, // next_shred_index,
+            0, // next_code_index
+            merkle_variant,
+            &ReedSolomonCache::default(),
+            &mut ProcessShredsStats::default(),
+        )
+        .1
+}
+
 // used for tests only
 pub fn make_slot_entries(
     slot: Slot,
